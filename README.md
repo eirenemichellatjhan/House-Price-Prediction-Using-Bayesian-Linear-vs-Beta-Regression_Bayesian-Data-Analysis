@@ -2,7 +2,7 @@
 
 This project applies Bayesian regression methods to predict house prices based on key property and location features from the kc_house_data dataset. After sampling 5,000 entries and selecting 11 predictors through correlation analysis, the goal was to identify which housing attributes most strongly influence price.
 
-**Tools**: R, rstanarm, Bayesian Linear Regression, Bayesian Beta Regression, DIC & WAIC Evaluation
+**Tools**: R, Bayesian Linear Regression, Bayesian Beta Regression, DIC & WAIC Evaluation
 
 **Approach**: Two Bayesian models were built: Linear Regression and Beta Regression. The Linear model was applied directly to the price variable, while the Beta model used a scaled price (0–1) for proportional estimation. Both models were compared using Deviance Information Criterion (DIC) and Widely Applicable Information Criterion (WAIC) to evaluate performance and model fit.
 
