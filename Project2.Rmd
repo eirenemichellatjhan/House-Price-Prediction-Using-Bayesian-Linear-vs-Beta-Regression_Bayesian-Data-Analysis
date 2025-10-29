@@ -1,0 +1,204 @@
+---
+title: "Untitled"
+author: "Eirene Michella Tjhan"
+date: "2024-12-20"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(rjags)
+library(geostatsp)
+library(dplyr)
+library(plotly)
+library(corrplot)
+```
+
+```{r}
+before <- read.csv("C:/Users/acer/Downloads/Bayesian/kc_house_data.csv")
+head(before)
+```
+
+```{r}
+before <- before %>% select(-date)
+```
+
+```{r}
+after <- before %>% slice_sample(n = 2000)
+head(after)
+```
+
+```{r}
+str(after)
+```
+
+```{r}
+corr_matrix <- round(cor(after), 2)
+plot_ly(
+  x = colnames(corr_matrix),
+  y = rownames(corr_matrix),
+  z = corr_matrix,
+  type = "heatmap",
+  colorscale = "RdBu",
+  zmin = -1,
+  zmax = 1
+) %>%
+  layout(
+    title = "Correlogram",
+    xaxis = list(tickangle = 45),
+    yaxis = list(tickangle = -45)
+  )
+```
+
+
+```{r}
+df <- after[, c("bedrooms", "bathrooms", "sqft_living", "floors", 
+                        "waterfront", "view", "grade", "sqft_above", 
+                        "sqft_basement", "lat", "sqft_living15", "price")]
+head(df)
+```
+
+```{r}
+# load covariance (x)
+bed         <- df[,1]
+bath        <- df[,2]
+living      <- df[,3]
+floors      <- df[,4]
+waterfront  <- df[,5]
+view        <- df[,6] 
+grade       <- df[,7] 
+above       <- df[,8]
+basement    <- df[,9]
+lat         <- df[,10]
+living15    <- df[,11]
+
+price <- as.numeric(df[,12])
+```
+
+
+
+
+## Bayesian Beta Regression
+```{r}
+# fit the y in range [0,1]
+epsilon <- 1e-6  # small constant to avoid 0 or 1
+Y_beta <- (df$price - min(df$price)) / (max(df$price) - min(df$price))
+Y_beta <- (Y_beta * (1 - 2 * epsilon)) + epsilon
+range(Y_beta)
+```
+
+```{r}
+# process X nya
+X_beta <- cbind(bed,bath,living,floors,waterfront,view,grade,above,basement,lat,living15) 
+# combining all features
+names_beta <- c("Intercept","Bedrooms","Bathrooms","Sqft Living","Floors",
+           "Waterfront","View","Grade",
+           "Sqft Above","Sqft Basement", "Lattitude","Sqft Living 15 Neighboor")
+```
+
+```{r}
+# remove missing data
+junk <- is.na(rowSums(X_beta))
+Y_beta <- Y_beta[!junk]
+X_beta <- X_beta[!junk,]
+```
+
+```{r}
+#Standardize the covariates
+X_beta <- as.matrix(scale(X_beta))
+X_beta <- cbind(1,X_beta) #add the intercept --> untuk menggantikan coeff beta0 di model
+colnames(X_beta) <- names_beta
+n_beta <- length(Y_beta)
+p_beta <- ncol(X_beta)
+```
+
+```{r}
+#Fit beta regression
+data_beta <- list(Y = Y_beta, X =X_beta, n = n_beta, p = p_beta)
+params_beta <- c("apha","r")
+burn_beta <- 1000
+n.iter_beta <- 5000
+n.chains_beta <- 2
+```
+
+```{r}
+model_string2 <- textConnection("model{
+  for(i in 1:n){
+    Y[i] ~ dbeta(r*mu[i],r*(1-mu[i]))
+    logit(mu[i]) <- inprod(X[i,],alpha[])
+    like[i] <- dbeta(Y[i], r * mu[i], r * (1 - mu[i]))  # Likelihood for WAIC computation
+  }
+  for(j in 1:p){alpha[j] ~ dnorm(0,0.01)}
+  r ~ dgamma(0.1,0.1)
+}")
+```
+ini dnorm itu detect nya precision maka waktu di model Normal(0,100) jadi dnorm(0, 1/100)
+
+```{r}
+inits_beta <- list(
+  beta = rnorm(p_beta),  
+  r = 1                 
+)
+model_beta <- jags.model(model_string2, data = data_beta, inits = inits_beta, n.chains = n.chains_beta)
+update(model_beta, burn_beta)
+samples_beta <- coda.samples(model_beta, variable.names = params_beta ,thin = 5, n.iter = n.iter_beta)
+```
+
+
+```{r}
+sum_beta <- summary(samples_beta)
+rownames(sum_beta$statistics) <- c(names_beta,"r")
+rownames(sum_beta$quantiles) <- c(names_beta,"r")
+sum_beta
+```
+
+```{r}
+#Graphical diagnostics
+par(mar = c(2, 2, 2, 2))
+plot(samples_beta)
+```
+
+```{r}
+autocorr.plot(samples_beta)
+```
+
+```{r}
+#Numerical diagnostics
+autocorr(samples_beta,lag = 1) #autocorrelation near 1 indicates poor convergence
+```
+
+```{r}
+effectiveSize(samples_beta) #low ESS indicates poor convergence
+```
+
+```{r}
+gelman.diag(samples_beta) #R greater than 1.1 indicates poor convergence
+```
+
+```{r}
+geweke.diag(samples_beta) #|z| greater than 2 indicates poor convergence
+```
+
+```{r}
+# Compute DIC
+DIC_beta <- dic.samples(model_beta, n.iter = n.iter_beta, thin = 5)
+print(DIC_beta)
+```
+
+
+
+
+```{r}
+#WAIC test
+samps_like_beta <- samples_beta[, (p_beta + 1):(p_beta + n_beta)]  
+like_beta <- rbind(samps_like_beta[[1]], samps_like_beta[[2]]) 
+
+fbar_beta <- colMeans(like_beta)
+Pw_beta <- sum(apply(log(like_beta), 2, var))
+
+WAIC_beta <- -2 * sum(log(fbar_beta)) + 2 * Pw_beta
+print(WAIC_beta)
+```

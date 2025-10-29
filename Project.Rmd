@@ -1,0 +1,276 @@
+---
+title: "Bayesian Project"
+author: "Eirene Michella Tjhan"
+date: "2024-12-19"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(rjags)
+library(geostatsp)
+library(dplyr)
+library(plotly)
+library(corrplot)
+```
+
+```{r}
+before <- read.csv("C:/Users/acer/Downloads/Bayesian/kc_house_data.csv")
+head(before)
+```
+
+```{r}
+before <- before %>% select(-date)
+```
+
+```{r}
+after <- before %>% slice_sample(n = 2000)
+head(after)
+```
+
+```{r}
+str(after)
+```
+
+```{r}
+corr_matrix <- round(cor(after), 2)
+plot_ly(
+  x = colnames(corr_matrix),
+  y = rownames(corr_matrix),
+  z = corr_matrix,
+  type = "heatmap",
+  colorscale = "RdBu",
+  zmin = -1,
+  zmax = 1
+) %>%
+  layout(
+    title = "Correlogram",
+    xaxis = list(tickangle = 45),
+    yaxis = list(tickangle = -45)
+  )
+```
+bedrooms, bathrooms, sqft_living, floors, waterfront, view, grade, sqft_above, sqft_basement, lat, sqft_living15 
+
+```{r}
+df <- after[, c("bedrooms", "bathrooms", "sqft_living", "floors", 
+                        "waterfront", "view", "grade", "sqft_above", 
+                        "sqft_basement", "lat", "sqft_living15", "price")]
+head(df)
+```
+
+```{r}
+# load covariance (x)
+bed         <- df[,1]
+bath        <- df[,2]
+living      <- df[,3]
+floors      <- df[,4]
+waterfront  <- df[,5]
+view        <- df[,6] 
+grade       <- df[,7] 
+above       <- df[,8]
+basement    <- df[,9]
+lat         <- df[,10]
+living15    <- df[,11]
+
+price <- as.numeric(df[,12])
+```
+
+## Bayesian Linear Regression: Uninformative Gaussian
+```{r}
+# Y as continuous for linear regression
+Y <- log(price)
+```
+
+```{r}
+hist(Y, breaks = 30, prob = TRUE, 
+     main = "Histogram of Log-Transformed Price", 
+     xlab = "Log(Price)", col = "lightblue")
+lines(density(Y), col = "red", lwd = 2)
+```
+
+```{r}
+# process X nya
+X <- cbind(bed,bath,living,floors,waterfront,view,grade,above,basement,lat,living15) 
+# combining all features
+names <- c("Intercept","Bedrooms","Bathrooms","Sqft Living","Floors",
+           "Waterfront","View","Grade",
+           "Sqft Above","Sqft Basement", "Lattitude","Sqft Living 15 Neighboor")
+```
+
+```{r}
+# remove missing data
+junk <- is.na(rowSums(X))
+Y <- Y[!junk]
+X <- X[!junk,]
+```
+
+```{r}
+# standardize the covariates
+X <- as.matrix(scale(X))
+```
+
+```{r}
+# fit into jag
+n <- length(Y)
+p <- ncol(X) 
+data <- list(Y=Y,X=X,n=n,p=p)
+params <- c("alpha","beta", "taue", "like")
+burn <- 10000
+n.iter <- 20000
+n.chains <- 2 
+```
+
+```{r}
+model_string <- textConnection("model{
+   # Likelihood
+    for(i in 1:n){
+      Y[i] ~ dnorm(alpha+inprod(X[i,],beta[]),taue)
+      like[i] <- dnorm(Y[i], alpha + inprod(X[i,], beta[]), taue)  # Likelihood for WAIC
+    }
+   # Priors
+    for(j in 1:p){
+      beta[j] ~ dnorm(0,0.001)
+    }
+    alpha ~ dnorm(0,0.001)
+    taue  ~ dgamma(0.1, 0.1)
+    
+    # Posterior Predictive Distribution (PPD)
+    for(i in 1:n){
+      Y2[i] ~ dnorm(alpha + inprod(X[i,], beta[]), taue)  # Simulate predicted data
+    }
+     
+    # Compute summary statistics for posterior predictive checks (PPC)
+    D[1] <- mean(Y2[])      # Mean of predicted values
+    D[2] <- sd(Y2[])        # Standard deviation of predicted values
+ }")
+```
+
+```{r}
+model <- jags.model(model_string,data = data, n.chains=n.chains,quiet=TRUE)
+update(model, burn)
+samples <- coda.samples(model, variable.names=params, n.iter=n.iter)
+```
+
+```{r}
+sum <- summary(samples)
+rownames(sum$statistics) <- names
+rownames(sum$quantiles) <- names
+sum
+```
+
+```{r}
+#Graphical diagnostics
+par(mar = c(4, 4, 4, 4))
+plot(samples)
+```
+
+```{r}
+autocorr.plot(samples)
+```
+
+```{r}
+#Numerical diagnostics
+autocorr(samples,lag = 1) #autocorrelation near 1 indicates poor convergence
+```
+
+```{r}
+effectiveSize(samples) #low ESS indicates poor convergence
+```
+
+```{r}
+gelman.diag(samples) #R greater than 1.1 indicates poor convergence
+```
+
+```{r}
+geweke.diag(samples) #|z| greater than 2 indicates poor convergence
+```
+
+
+```{r}
+# DIC test
+DIC <- dic.samples(model, n.iter = n.iter, n.thin = 5)
+DIC_val <- sum(DIC$deviance) + sum(DIC$penalty)
+print(DIC_val)
+```
+
+```{r}
+# Extract likelihood values (one for each sample and each data point)
+like_samples <- extract(samples, "like")$like
+
+# Compute WAIC
+fbar <- colMeans(like_samples)  # Mean likelihood across samples
+Pw <- sum(apply(log(like_samples), 2, var))  # Variance of the log-likelihoods
+
+# Calculate WAIC
+WAIC <- -2 * sum(log(fbar)) + 2 * Pw
+print(WAIC)
+```
+
+
+samps_like <- samps[,(p+1):(n+p)]
+like <- rbind(samps_like[[1]],samps_like[[2]])
+
+
+
+
+
+
+
+
+
+
+```{r}
+#WAIC test
+samps_like <- samples[, (p + 1):(p + n)]  
+like <- rbind(samps_like[[1]], samps_like[[2]]) 
+
+fbar <- colMeans(like)
+Pw <- sum(apply(log(like), 2, var))
+
+WAIC <- -2 * sum(log(fbar)) + 2 * Pw
+print(WAIC)
+```
+
+```{r}
+WAIC
+```
+
+
+```{r}
+#PDD test
+D <- rbind(samples[[1]],samples[[2]])
+
+#compute the test stats for the data (original data)
+D0 <- c(mean(Y),sd(Y))
+Dnames <- c("Mean Y","sd Y")
+
+#compute the test stats for the model
+pval <- rep(0,3)
+names(pval) <- Dnames
+
+for(j in 1:3){
+  plot(density(D[,j]),xlim=range(c(D0[j],D[,j])), xlab="D",ylab="Posterior probability",main=Dnames[j])
+  abline(v=D0[j],col=2)
+  legend("topleft",c("Model","Data"),lty=1,col=1:2,bty="n")
+  pval[j] <- mean(D[,j]>D0[j])
+}
+pval
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
