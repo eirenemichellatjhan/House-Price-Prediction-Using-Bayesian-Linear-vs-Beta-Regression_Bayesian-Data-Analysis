@@ -4,7 +4,7 @@ This project applies Bayesian regression methods to predict house prices based o
 
 **Tools**: R, rstanarm, Bayesian Linear Regression, Bayesian Beta Regression, DIC & WAIC Evaluation
 
-**Approach**: Two Bayesian models were built — Linear Regression and Beta Regression. The Linear model was applied directly to the price variable, while the Beta model used a scaled price (0–1) for proportional estimation. Both models were compared using Deviance Information Criterion (DIC) and Widely Applicable Information Criterion (WAIC) to evaluate performance and model fit.
+**Approach**: Two Bayesian models were built: Linear Regression and Beta Regression. The Linear model was applied directly to the price variable, while the Beta model used a scaled price (0–1) for proportional estimation. Both models were compared using Deviance Information Criterion (DIC) and Widely Applicable Information Criterion (WAIC) to evaluate performance and model fit.
 
 **Results**:
 * Bayesian Linear Regression achieved lower DIC (1112.35) and WAIC (397.51), indicating better predictive accuracy than Bayesian Beta Regression (DIC = 2467.76, WAIC = 548.13).
